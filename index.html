@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pro Gear Monitor (Final Edition V11.2)</title>
+<title>Pro Gear Monitor (Final Edition V11.3)</title>
 <style>
     :root {
         --bg: #0b0e14; --panel: #151a22; --border: #2a3241;
@@ -60,7 +60,7 @@
 </head>
 <body>
 <header>
-    <h2>PRO ACOUSTIC SYSTEM <span class="version-tag">(V11.2)</span><span class="local-tag">EDGE COMPUTING</span></h2>
+    <h2>PRO ACOUSTIC SYSTEM <span class="version-tag">(V11.3)</span><span class="local-tag">EDGE COMPUTING</span></h2>
     <div class="control-group">
         <button id="btn-mic" class="sys-btn" onclick="startMic()">START MIC</button>
         <button id="btn-pause" class="sys-btn active-pink" onclick="togglePause()">PAUSE SYSTEM</button>
@@ -103,7 +103,7 @@
     // ==========================================
     let dbData = {"Device A": {"1": [], "2": [], "3": [], "4": [], "5": []}};
     let activeProfile = "Device A";
-    const DB_KEY = "pro_gear_db_v11_2";
+    const DB_KEY = "pro_gear_db_v11_3";
 
     function loadData() {
         try {
@@ -197,7 +197,6 @@
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             analyser = audioCtx.createAnalyser();
             
-            // 將頻率解析度拉到最高，精準捕捉細微的機械運轉頻率
             analyser.fftSize = 16384; 
             
             source = audioCtx.createMediaStreamSource(stream);
@@ -245,9 +244,8 @@
         const nyquist = audioCtx.sampleRate / 2;
         const peakHz = maxVal > 50 ? (maxIndex * nyquist) / dataArray.length : 0; 
         
-        // 將數位 dBFS 轉換為正數的近似聲壓級 (SPL) 顯示
-        const dbFS = maxVal > 0 ? 20 * Math.log10(maxVal / 255) : -100;
-        const dbSPL = maxVal > 0 ? Math.max(0, dbFS + 100) : 0;
+        // 【核心修改】模擬真實環境分貝：將數位訊號強度映射到 35dB(安靜房間) ~ 95dB(大聲運轉)
+        const dbSPL = maxVal > 0 ? 35 + (maxVal / 255) * 60 : 0;
 
         document.getElementById('hz-val').textContent = peakHz.toFixed(1);
         document.getElementById('db-val').textContent = dbSPL.toFixed(1);
