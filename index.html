@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pro Gear Monitor (Final Edition V11.3)</title>
+<title>Pro Gear Monitor (Final Edition V11.4)</title>
 <style>
     :root {
         --bg: #0b0e14; --panel: #151a22; --border: #2a3241;
@@ -60,7 +60,7 @@
 </head>
 <body>
 <header>
-    <h2>PRO ACOUSTIC SYSTEM <span class="version-tag">(V11.3)</span><span class="local-tag">EDGE COMPUTING</span></h2>
+    <h2>PRO ACOUSTIC SYSTEM <span class="version-tag">(V11.4)</span><span class="local-tag">EDGE COMPUTING</span></h2>
     <div class="control-group">
         <button id="btn-mic" class="sys-btn" onclick="startMic()">START MIC</button>
         <button id="btn-pause" class="sys-btn active-pink" onclick="togglePause()">PAUSE SYSTEM</button>
@@ -103,7 +103,7 @@
     // ==========================================
     let dbData = {"Device A": {"1": [], "2": [], "3": [], "4": [], "5": []}};
     let activeProfile = "Device A";
-    const DB_KEY = "pro_gear_db_v11_3";
+    const DB_KEY = "pro_gear_db_v11_4";
 
     function loadData() {
         try {
@@ -186,9 +186,12 @@
     // ==========================================
     // 2. Audio Processing & Spectrogram
     // ==========================================
-    let audioCtx, analyser, dataArray, source, isRunning = false, isPaused = false;
+    let audioCtx, analyser, freqDataArray, timeDataArray, source, isRunning = false, isPaused = false;
     const canvas = document.getElementById('spectrogram');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    
+    // 軟體校正偏移值：可根據實際硬體麥克風靈敏度調整 (通常在 100~110 之間)
+    const CALIBRATION_OFFSET = 105; 
 
     async function startMic() {
         if (isRunning) return;
@@ -201,7 +204,10 @@
             
             source = audioCtx.createMediaStreamSource(stream);
             source.connect(analyser);
-            dataArray = new Uint8Array(analyser.frequencyBinCount);
+            
+            // 需要兩個陣列：一個抓頻率特徵(FFT)，一個抓時間域能量(RMS)
+            freqDataArray = new Uint8Array(analyser.frequencyBinCount);
+            timeDataArray = new Float32Array(analyser.fftSize);
             
             isRunning = true;
             document.getElementById('led').className = 'led on';
@@ -233,36 +239,55 @@
         requestAnimationFrame(drawLoop);
         if (isPaused || !isRunning) return;
 
-        analyser.getByteFrequencyData(dataArray);
-        
+        // 1. 分析頻率 (尋找最高峰值 Peak Hz)
+        analyser.getByteFrequencyData(freqDataArray);
         let maxVal = -Infinity;
         let maxIndex = -1;
-        for(let i = 0; i < dataArray.length; i++) {
-            if (dataArray[i] > maxVal) { maxVal = dataArray[i]; maxIndex = i; }
+        for(let i = 0; i < freqDataArray.length; i++) {
+            if (freqDataArray[i] > maxVal) { maxVal = freqDataArray[i]; maxIndex = i; }
+        }
+        
+        const nyquist = audioCtx.sampleRate / 2;
+        const peakHz = maxVal > 50 ? (maxIndex * nyquist) / freqDataArray.length : 0; 
+
+        // 2. 分析時間域 (計算標準 RMS 聲壓級 dB SPL)
+        analyser.getFloatTimeDomainData(timeDataArray);
+        let sumSquares = 0;
+        for (let i = 0; i < timeDataArray.length; i++) {
+            sumSquares += timeDataArray[i] * timeDataArray[i];
+        }
+        let rms = Math.sqrt(sumSquares / timeDataArray.length);
+        
+        // 避免 log(0) 產生 -Infinity
+        let dbSPL = 0;
+        if (rms > 0.0001) { 
+            let dbFS = 20 * Math.log10(rms); // 算出原始數位分貝
+            dbSPL = Math.max(0, dbFS + CALIBRATION_OFFSET); // 加上校正偏移，轉換為正數 SPL
         }
 
-        const nyquist = audioCtx.sampleRate / 2;
-        const peakHz = maxVal > 50 ? (maxIndex * nyquist) / dataArray.length : 0; 
-        
-        // 【核心修改】模擬真實環境分貝：將數位訊號強度映射到 35dB(安靜房間) ~ 95dB(大聲運轉)
-        const dbSPL = maxVal > 0 ? 35 + (maxVal / 255) * 60 : 0;
+        // 當低於特定分貝閾值時，代表極度安靜，過濾雜訊顯示 0 Hz
+        if (dbSPL < 30) {
+            document.getElementById('hz-val').textContent = '0.0';
+            document.getElementById('db-val').textContent = dbSPL.toFixed(1);
+            matchGear(0);
+        } else {
+            document.getElementById('hz-val').textContent = peakHz.toFixed(1);
+            document.getElementById('db-val').textContent = dbSPL.toFixed(1);
+            matchGear(peakHz);
+        }
 
-        document.getElementById('hz-val').textContent = peakHz.toFixed(1);
-        document.getElementById('db-val').textContent = dbSPL.toFixed(1);
-
-        matchGear(peakHz);
-
+        // 3. 繪製頻譜圖
         if(canvas.width !== canvas.offsetWidth) canvas.width = canvas.offsetWidth;
         if(canvas.height !== canvas.offsetHeight) canvas.height = canvas.offsetHeight;
         
         const imgData = ctx.getImageData(1, 0, canvas.width - 1, canvas.height);
         ctx.putImageData(imgData, 0, 0);
 
-        for(let i = 0; i < dataArray.length; i++) {
-            const y = canvas.height - (i / dataArray.length) * canvas.height;
-            const val = dataArray[i];
+        for(let i = 0; i < freqDataArray.length; i++) {
+            const y = canvas.height - (i / freqDataArray.length) * canvas.height;
+            const val = freqDataArray[i];
             ctx.fillStyle = `rgb(${val}, ${Math.max(0, val - 100)}, ${Math.max(0, 255 - val)})`;
-            ctx.fillRect(canvas.width - 1, y, 1, canvas.height / dataArray.length);
+            ctx.fillRect(canvas.width - 1, y, 1, canvas.height / freqDataArray.length);
         }
     }
 
