@@ -34,11 +34,10 @@
     
     .content-wrapper { flex-grow: 1; position: relative; overflow: hidden; }
     
-    #view-spectrogram { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: grid; grid-template-columns: 50px 1fr; grid-template-rows: 1fr 25px; background: #000; z-index: 1; }
-    canvas { display: block; width: 100%; height: 100%; }
-    #spectrogram { image-rendering: pixelated; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    #view-spectrogram { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 1; }
+    #spectrogram { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
     
-    #view-dashboard { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: space-around; align-items: center; background: var(--bg); padding: 20px; box-sizing: border-box; gap: 20px; z-index: 10; transition: opacity 0.4s ease; }
+    #view-dashboard { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: space-around; align-items: center; background: rgba(11, 14, 20, 0.9); padding: 20px; box-sizing: border-box; gap: 20px; z-index: 10; transition: opacity 0.4s ease; backdrop-filter: blur(5px); }
     #view-dashboard.hidden { opacity: 0; pointer-events: none; }
     
     .panel { text-align: center; flex: 1; background: var(--panel); padding: 40px 20px; border-radius: 12px; border: 1px solid var(--border); box-shadow: inset 0 0 20px rgba(0,0,0,0.5); }
@@ -65,7 +64,7 @@
     <div class="control-group">
         <button id="btn-mic" class="sys-btn" onclick="startMic()">START MIC</button>
         <button id="btn-pause" class="sys-btn active-pink" onclick="togglePause()">PAUSE SYSTEM</button>
-        <button id="btn-view" class="sys-btn" onclick="toggleView()">SHOW SPECTROGRAM</button>
+        <button id="btn-view" class="sys-btn" onclick="toggleView()">HIDE DASHBOARD</button>
         <div class="status"><span class="led" id="led"></span><span id="status-text">OFFLINE</span></div>
     </div>
 </header>
@@ -82,7 +81,7 @@
 </div>
 
 <div class="content-wrapper">
-    <div id="view-spectrogram"><canvas id="y"></canvas><canvas id="spectrogram"></canvas><div style="background:#000;"></div><canvas id="x"></canvas></div>
+    <div id="view-spectrogram"><canvas id="spectrogram"></canvas></div>
     <div id="view-dashboard">
         <div class="panel"><div class="panel-title">Peak Frequency</div><div><span id="hz-val" class="panel-value">0</span><span class="panel-unit">Hz</span></div></div>
         <div class="panel"><div class="panel-title">Volume (dB)</div><div><span id="db-val" class="panel-value db">0.0</span><span class="panel-unit">dB</span></div></div>
@@ -116,18 +115,14 @@
                     activeProfile = Object.keys(dbData)[0];
                 }
             }
-        } catch (e) {
-            console.error("Local storage load error", e);
-        }
+        } catch (e) { console.error("Load error", e); }
     }
 
     function saveData() {
         try {
             localStorage.setItem(DB_KEY, JSON.stringify(dbData));
             updateUI();
-        } catch (e) {
-            console.error("Local storage save error", e);
-        }
+        } catch (e) { console.error("Save error", e); }
     }
 
     loadData();
@@ -139,9 +134,184 @@
 
         if (currentProfiles !== newProfiles) {
             sel.innerHTML = '';
-            Object.keys(dbData).forEach(p => { let opt = new Option(p, p); sel.add(opt); });
+            Object.keys(dbData).forEach(p => { sel.add(new Option(p, p)); });
         }
         sel.value = activeProfile;
 
+        // --- 這裡就是你原本斷掉的地方 ---
         for (let i = 1; i <= 5; i++) {
-         
+            const dataArr = dbData[activeProfile][i];
+            const targetEl = document.getElementById(`target-${i}`);
+            const clearEl = document.getElementById(`clear-${i}`);
+            
+            if (dataArr && dataArr.length > 0) {
+                const avgHz = dataArr.reduce((a, b) => a + b, 0) / dataArr.length;
+                targetEl.textContent = `${avgHz.toFixed(1)} Hz`;
+                targetEl.classList.remove('unset');
+                clearEl.classList.remove('hide');
+            } else {
+                targetEl.textContent = 'Not Set';
+                targetEl.classList.add('unset');
+                clearEl.classList.add('hide');
+            }
+        }
+    }
+
+    // ==========================================
+    // 2. Profile Management
+    // ==========================================
+    function switchProfile(p) { activeProfile = p; updateUI(); }
+    function addProfile() { 
+        const p = prompt("Enter new device profile name:"); 
+        if(p && !dbData[p]) { dbData[p] = {"1":[], "2":[], "3":[], "4":[], "5":[]}; activeProfile = p; saveData(); } 
+    }
+    function deleteProfile() { 
+        if(Object.keys(dbData).length > 1 && confirm(`Delete profile: ${activeProfile}?`)) { 
+            delete dbData[activeProfile]; activeProfile = Object.keys(dbData)[0]; saveData(); 
+        } else if (Object.keys(dbData).length <= 1) {
+            alert("Cannot delete the last profile.");
+        }
+    }
+    function exportData() {
+        const blob = new Blob([JSON.stringify(dbData)], {type: 'application/json'});
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'pro_gear_data.json'; a.click();
+    }
+    function importData(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            try { dbData = JSON.parse(ev.target.result); activeProfile = Object.keys(dbData)[0]; saveData(); } 
+            catch(err) { alert("Invalid JSON file format!"); }
+        };
+        reader.readAsText(file);
+    }
+
+    // ==========================================
+    // 3. Audio Processing & Spectrogram
+    // ==========================================
+    let audioCtx, analyser, dataArray, source, isRunning = false, isPaused = false;
+    const canvas = document.getElementById('spectrogram');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    async function startMic() {
+        if (isRunning) return;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 4096; // 提高頻率解析度
+            source = audioCtx.createMediaStreamSource(stream);
+            source.connect(analyser);
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+            
+            isRunning = true;
+            document.getElementById('led').className = 'led on';
+            document.getElementById('status-text').textContent = 'ONLINE';
+            document.getElementById('btn-mic').textContent = 'MIC ACTIVE';
+            document.getElementById('btn-mic').style.color = '#0f0';
+            
+            drawLoop();
+        } catch (err) { alert("Microphone access denied or error: " + err); }
+    }
+
+    function togglePause() {
+        if (!isRunning) return;
+        isPaused = !isPaused;
+        document.getElementById('btn-pause').textContent = isPaused ? 'RESUME SYSTEM' : 'PAUSE SYSTEM';
+        document.getElementById('btn-pause').classList.toggle('active-pink');
+        document.getElementById('led').className = isPaused ? 'led paused' : 'led on';
+        document.getElementById('status-text').textContent = isPaused ? 'PAUSED' : 'ONLINE';
+    }
+
+    function toggleView() {
+        const dash = document.getElementById('view-dashboard');
+        dash.classList.toggle('hidden');
+        const btn = document.getElementById('btn-view');
+        btn.textContent = dash.classList.contains('hidden') ? 'SHOW DASHBOARD' : 'HIDE DASHBOARD';
+    }
+
+    function drawLoop() {
+        requestAnimationFrame(drawLoop);
+        if (isPaused || !isRunning) return;
+
+        analyser.getByteFrequencyData(dataArray);
+        
+        // Find Peak Frequency
+        let maxVal = -Infinity;
+        let maxIndex = -1;
+        for(let i = 0; i < dataArray.length; i++) {
+            if (dataArray[i] > maxVal) { maxVal = dataArray[i]; maxIndex = i; }
+        }
+
+        const nyquist = audioCtx.sampleRate / 2;
+        // 過濾雜音閾值 (大於 50 才算有效聲音)
+        const peakHz = maxVal > 50 ? (maxIndex * nyquist) / dataArray.length : 0; 
+        const db = maxVal > 0 ? 20 * Math.log10(maxVal / 255) : -100;
+
+        document.getElementById('hz-val').textContent = peakHz.toFixed(1);
+        document.getElementById('db-val').textContent = db.toFixed(1);
+
+        matchGear(peakHz);
+
+        // Draw simple scrolling spectrogram
+        if(canvas.width !== canvas.offsetWidth) canvas.width = canvas.offsetWidth;
+        if(canvas.height !== canvas.offsetHeight) canvas.height = canvas.offsetHeight;
+        
+        const imgData = ctx.getImageData(1, 0, canvas.width - 1, canvas.height);
+        ctx.putImageData(imgData, 0, 0);
+
+        for(let i = 0; i < dataArray.length; i++) {
+            const y = canvas.height - (i / dataArray.length) * canvas.height;
+            const val = dataArray[i];
+            ctx.fillStyle = `rgb(${val}, ${Math.max(0, val - 100)}, ${Math.max(0, 255 - val)})`;
+            ctx.fillRect(canvas.width - 1, y, 1, canvas.height / dataArray.length);
+        }
+    }
+
+    // ==========================================
+    // 4. Calibration & Gear Matching
+    // ==========================================
+    function recordGear(gear) {
+        const currentHz = parseFloat(document.getElementById('hz-val').textContent);
+        if (currentHz > 0) {
+            dbData[activeProfile][gear].push(currentHz);
+            // 只保留最近 5 次的採樣來計算平均值
+            if(dbData[activeProfile][gear].length > 5) dbData[activeProfile][gear].shift();
+            saveData();
+        } else {
+            alert("No clear audio detected! Please ensure the mic is running and picking up sound.");
+        }
+    }
+
+    function clearGear(gear) {
+        dbData[activeProfile][gear] = [];
+        saveData();
+    }
+
+    function matchGear(currentHz) {
+        if (currentHz <= 0) return document.getElementById('gear-val').textContent = '-';
+        
+        let closestGear = '-';
+        let minDiff = Infinity;
+        const tolerance = 60; // 頻率容錯範圍 (+- 60Hz)
+
+        for(let i = 1; i <= 5; i++) {
+            const arr = dbData[activeProfile][i];
+            if(arr && arr.length > 0) {
+                const targetHz = arr.reduce((a,b) => a+b, 0) / arr.length;
+                const diff = Math.abs(currentHz - targetHz);
+                if (diff < tolerance && diff < minDiff) {
+                    minDiff = diff;
+                    closestGear = i;
+                }
+            }
+        }
+        document.getElementById('gear-val').textContent = closestGear;
+    }
+
+    // Init
+    updateUI();
+</script>
+</body>
+</html>
