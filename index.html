@@ -205,7 +205,7 @@
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     
     // 分貝校正值調整
-    const CALIBRATION_OFFSET = 70; 
+    const CALIBRATION_OFFSET = 80; 
 
     async function startMic() {
         if (isRunning) return;
@@ -277,8 +277,8 @@
             dbSPL = Math.max(0, dbFS + CALIBRATION_OFFSET); 
         }
 
-        // 3. 靜音過濾機制：門檻降為 10
-        if (dbSPL < 10) { 
+        // 3. 靜音過濾機制：門檻降為 2
+        if (dbSPL < 2) { 
             document.getElementById('hz-val').textContent = '0.0';
             document.getElementById('db-val').textContent = dbSPL.toFixed(1);
             matchGear(0);
