@@ -76,7 +76,7 @@
     <button class="sys-btn small active-pink" onclick="deleteProfile()">- DELETE</button>
     
     <button class="sys-btn small" style="margin-left:auto; color: #fff; border-color: #555;" onclick="exportData()">[💾] EXPORT DATA</button>
-    <button class="sys-btn small" style="color: #fff; border-color: #555;" onclick="document.getElementById('import-file').click()">[📂] IMPORT DATA</button>
+    <button class="sys-btn small" style="margin-left:10px; color: #fff; border-color: #555;" onclick="document.getElementById('import-file').click()">[📂] IMPORT DATA</button>
     <input type="file" id="import-file" style="display:none" accept=".json" onchange="importData(event)">
 </div>
 
@@ -168,19 +168,33 @@
             alert("Cannot delete the last profile.");
         }
     }
+    
+    // 匯出 JSON，檔名加入時間戳記
     function exportData() {
-        const blob = new Blob([JSON.stringify(dbData)], {type: 'application/json'});
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'pro_gear_data.json'; a.click();
+        const blob = new Blob([JSON.stringify(dbData, null, 2)], {type: 'application/json'});
+        const a = document.createElement('a'); 
+        a.href = URL.createObjectURL(blob); 
+        a.download = `pro_gear_data_${new Date().getTime()}.json`; 
+        a.click();
     }
+    
+    // 匯入 JSON
     function importData(e) {
         const file = e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
         reader.onload = (ev) => {
-            try { dbData = JSON.parse(ev.target.result); activeProfile = Object.keys(dbData)[0]; saveData(); } 
-            catch(err) { alert("Invalid JSON file format!"); }
+            try { 
+                dbData = JSON.parse(ev.target.result); 
+                activeProfile = Object.keys(dbData)[0]; 
+                saveData(); 
+                alert("資料匯入成功！");
+            } catch(err) { 
+                alert("檔案格式錯誤，請選擇正確的 JSON 檔！"); 
+            }
         };
         reader.readAsText(file);
+        e.target.value = ''; 
     }
 
     // ==========================================
@@ -190,8 +204,8 @@
     const canvas = document.getElementById('spectrogram');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     
-    // 軟體校正偏移值：可根據實際硬體麥克風靈敏度調整 (通常在 100~110 之間)
-    const CALIBRATION_OFFSET = 80; 
+    // 分貝校正值調整
+    const CALIBRATION_OFFSET = 70; 
 
     async function startMic() {
         if (isRunning) return;
@@ -205,7 +219,6 @@
             source = audioCtx.createMediaStreamSource(stream);
             source.connect(analyser);
             
-            // 需要兩個陣列：一個抓頻率特徵(FFT)，一個抓時間域能量(RMS)
             freqDataArray = new Uint8Array(analyser.frequencyBinCount);
             timeDataArray = new Float32Array(analyser.fftSize);
             
@@ -239,7 +252,7 @@
         requestAnimationFrame(drawLoop);
         if (isPaused || !isRunning) return;
 
-        // 1. 分析頻率 (尋找最高峰值 Peak Hz)
+        // 1. 抓取頻率
         analyser.getByteFrequencyData(freqDataArray);
         let maxVal = -Infinity;
         let maxIndex = -1;
@@ -250,7 +263,7 @@
         const nyquist = audioCtx.sampleRate / 2;
         const peakHz = maxVal > 50 ? (maxIndex * nyquist) / freqDataArray.length : 0; 
 
-        // 2. 分析時間域 (計算標準 RMS 聲壓級 dB SPL)
+        // 2. 抓取分貝數 (RMS)
         analyser.getFloatTimeDomainData(timeDataArray);
         let sumSquares = 0;
         for (let i = 0; i < timeDataArray.length; i++) {
@@ -258,15 +271,14 @@
         }
         let rms = Math.sqrt(sumSquares / timeDataArray.length);
         
-        // 避免 log(0) 產生 -Infinity
         let dbSPL = 0;
         if (rms > 0.0001) { 
-            let dbFS = 20 * Math.log10(rms); // 算出原始數位分貝
-            dbSPL = Math.max(0, dbFS + CALIBRATION_OFFSET); // 加上校正偏移，轉換為正數 SPL
+            let dbFS = 20 * Math.log10(rms); 
+            dbSPL = Math.max(0, dbFS + CALIBRATION_OFFSET); 
         }
 
-        // 當低於特定分貝閾值時，代表極度安靜，過濾雜訊顯示 0 Hz
-        if (dbSPL < 30) {
+        // 3. 靜音過濾機制：門檻降為 10
+        if (dbSPL < 10) { 
             document.getElementById('hz-val').textContent = '0.0';
             document.getElementById('db-val').textContent = dbSPL.toFixed(1);
             matchGear(0);
@@ -276,7 +288,7 @@
             matchGear(peakHz);
         }
 
-        // 3. 繪製頻譜圖
+        // 4. 畫頻譜圖
         if(canvas.width !== canvas.offsetWidth) canvas.width = canvas.offsetWidth;
         if(canvas.height !== canvas.offsetHeight) canvas.height = canvas.offsetHeight;
         
