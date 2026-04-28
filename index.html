@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pro Gear Monitor (Final Edition V11.4)</title>
+<title>Pro Gear Monitor (Final Edition V11.5)</title>
 <style>
     :root {
         --bg: #0b0e14; --panel: #151a22; --border: #2a3241;
@@ -60,7 +60,7 @@
 </head>
 <body>
 <header>
-    <h2>PRO ACOUSTIC SYSTEM <span class="version-tag">(V11.4)</span><span class="local-tag">EDGE COMPUTING</span></h2>
+    <h2>PRO ACOUSTIC SYSTEM <span class="version-tag">(V11.5)</span><span class="local-tag">EDGE COMPUTING</span></h2>
     <div class="control-group">
         <button id="btn-mic" class="sys-btn" onclick="startMic()">START MIC</button>
         <button id="btn-pause" class="sys-btn active-pink" onclick="togglePause()">PAUSE SYSTEM</button>
@@ -103,7 +103,7 @@
     // ==========================================
     let dbData = {"Device A": {"1": [], "2": [], "3": [], "4": [], "5": []}};
     let activeProfile = "Device A";
-    const DB_KEY = "pro_gear_db_v11_4";
+    const DB_KEY = "pro_gear_db_v11_5";
 
     function loadData() {
         try {
@@ -169,7 +169,6 @@
         }
     }
     
-    // 匯出 JSON，檔名加入時間戳記
     function exportData() {
         const blob = new Blob([JSON.stringify(dbData, null, 2)], {type: 'application/json'});
         const a = document.createElement('a'); 
@@ -178,7 +177,6 @@
         a.click();
     }
     
-    // 匯入 JSON
     function importData(e) {
         const file = e.target.files[0];
         if (!file) return;
@@ -204,8 +202,8 @@
     const canvas = document.getElementById('spectrogram');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     
-    // 分貝校正值調整
-    const CALIBRATION_OFFSET = 80; 
+    // 【設定】分貝校正值
+    const CALIBRATION_OFFSET = 70; 
 
     async function startMic() {
         if (isRunning) return;
@@ -254,14 +252,20 @@
 
         // 1. 抓取頻率
         analyser.getByteFrequencyData(freqDataArray);
+        const nyquist = audioCtx.sampleRate / 2;
+        
+        // 【過濾器核心】：只尋找 300 Hz 以下的頻率，徹底無視高頻風切聲與雜訊
+        const MAX_SEARCH_HZ = 300; 
+        const maxSearchIndex = Math.min(freqDataArray.length, Math.floor((MAX_SEARCH_HZ / nyquist) * freqDataArray.length));
+
         let maxVal = -Infinity;
         let maxIndex = -1;
-        for(let i = 0; i < freqDataArray.length; i++) {
+        for(let i = 0; i < maxSearchIndex; i++) {
             if (freqDataArray[i] > maxVal) { maxVal = freqDataArray[i]; maxIndex = i; }
         }
         
-        const nyquist = audioCtx.sampleRate / 2;
-        const peakHz = maxVal > 50 ? (maxIndex * nyquist) / freqDataArray.length : 0; 
+        // 【強度門檻】：將限制降到最低(> 5)，小聲也能穩穩抓取
+        const peakHz = maxVal > 5 ? (maxIndex * nyquist) / freqDataArray.length : 0; 
 
         // 2. 抓取分貝數 (RMS)
         analyser.getFloatTimeDomainData(timeDataArray);
@@ -277,7 +281,7 @@
             dbSPL = Math.max(0, dbFS + CALIBRATION_OFFSET); 
         }
 
-        // 3. 靜音過濾機制：門檻降為 2
+        // 3. 靜音過濾機制：【分貝門檻降至 2】，避免頻率歸零亂跳
         if (dbSPL < 2) { 
             document.getElementById('hz-val').textContent = '0.0';
             document.getElementById('db-val').textContent = dbSPL.toFixed(1);
@@ -288,7 +292,7 @@
             matchGear(peakHz);
         }
 
-        // 4. 畫頻譜圖
+        // 4. 畫頻譜圖 (視覺維持全頻段顯示，不受 MAX_SEARCH_HZ 影響)
         if(canvas.width !== canvas.offsetWidth) canvas.width = canvas.offsetWidth;
         if(canvas.height !== canvas.offsetHeight) canvas.height = canvas.offsetHeight;
         
