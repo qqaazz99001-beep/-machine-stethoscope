@@ -75,11 +75,8 @@
     <button class="sys-btn small" onclick="addProfile()">+ ADD NEW</button>
     <button class="sys-btn small active-pink" onclick="deleteProfile()">- DELETE</button>
     
-    <button id="btn-upload" class="sys-btn small" style="margin-left:auto; color: var(--cyan); border-color: var(--cyan);" onclick="uploadToCloud()">[☁️] UPLOAD TO CLOUD</button>
-    <button id="btn-sync" class="sys-btn small" style="margin-left:10px; color: var(--yellow); border-color: var(--yellow);" onclick="fetchFromCloud()">[☁️] SYNC FROM CLOUD</button>
-    
-    <button class="sys-btn small" style="margin-left:10px; color: #fff; border-color: #555;" onclick="exportData()">[💾] EXPORT</button>
-    <button class="sys-btn small" style="color: #fff; border-color: #555;" onclick="document.getElementById('import-file').click()">[📂] IMPORT</button>
+    <button class="sys-btn small" style="margin-left:auto; color: #fff; border-color: #555;" onclick="exportData()">[💾] EXPORT DATA</button>
+    <button class="sys-btn small" style="margin-left:10px; color: #fff; border-color: #555;" onclick="document.getElementById('import-file').click()">[📂] IMPORT DATA</button>
     <input type="file" id="import-file" style="display:none" accept=".json" onchange="importData(event)">
 </div>
 
@@ -101,9 +98,6 @@
 </div>
 
 <script>
-    // 你的專屬雲端 API 網址
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbzRALyTGe3JiQ5N5_jLOLXKLXQZCAlBTgtu2ikZ9W6dRcJeNTBa06iSUUJAmUAnAJ3GVQ/exec';
-
     // ==========================================
     // 1. Local Storage Database Management
     // ==========================================
@@ -174,19 +168,33 @@
             alert("Cannot delete the last profile.");
         }
     }
+    
+    // 純淨的匯出功能
     function exportData() {
-        const blob = new Blob([JSON.stringify(dbData)], {type: 'application/json'});
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'pro_gear_data.json'; a.click();
+        const blob = new Blob([JSON.stringify(dbData, null, 2)], {type: 'application/json'});
+        const a = document.createElement('a'); 
+        a.href = URL.createObjectURL(blob); 
+        a.download = `pro_gear_data_${new Date().getTime()}.json`; // 加入時間戳記避免檔名重複
+        a.click();
     }
+    
+    // 純淨的匯入功能
     function importData(e) {
         const file = e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
         reader.onload = (ev) => {
-            try { dbData = JSON.parse(ev.target.result); activeProfile = Object.keys(dbData)[0]; saveData(); } 
-            catch(err) { alert("Invalid JSON file format!"); }
+            try { 
+                dbData = JSON.parse(ev.target.result); 
+                activeProfile = Object.keys(dbData)[0]; 
+                saveData(); 
+                alert("資料匯入成功！");
+            } catch(err) { 
+                alert("Invalid JSON file format!"); 
+            }
         };
         reader.readAsText(file);
+        e.target.value = ''; // 清空選擇器，允許重複匯入同一個檔案
     }
 
     // ==========================================
@@ -196,7 +204,7 @@
     const canvas = document.getElementById('spectrogram');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     
-    // 軟體校正偏移值：已修改為 70，讓一般講話音量落在 60 dB 左右
+    // 軟體校正偏移值：保留 70 讓分貝顯示正常
     const CALIBRATION_OFFSET = 70; 
 
     async function startMic() {
@@ -333,51 +341,6 @@
             }
         }
         document.getElementById('gear-val').textContent = closestGear;
-    }
-
-    // ==========================================
-    // 4. Cloud Database Integration
-    // ==========================================
-    async function uploadToCloud() {
-        const payload = {
-            profileName: activeProfile,
-            db: dbData[activeProfile]
-        };
-
-        const btn = document.getElementById('btn-upload');
-        btn.textContent = 'UPLOADING...';
-
-        try {
-            // 使用 no-cors 模式避免跨網域阻擋
-            await fetch(GAS_URL, {
-                method: 'POST',
-                mode: 'no-cors',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify(payload)
-            });
-            alert('數據已成功發送至雲端試算表！');
-        } catch (error) {
-            console.error('Upload failed', error);
-            alert('上傳請求已送出（若試算表有收到資料即為成功）。');
-        } finally {
-            btn.textContent = '[☁️] UPLOAD TO CLOUD';
-        }
-    }
-
-    async function fetchFromCloud() {
-        const btn = document.getElementById('btn-sync');
-        btn.textContent = 'SYNCING...';
-
-        try {
-            const response = await fetch(GAS_URL);
-            const allData = await response.json();
-            console.log('從雲端抓取到的資料：', allData);
-            alert(`成功從雲端抓取了 ${allData.length} 筆設備紀錄！請按鍵盤 F12 開啟開發者工具 (Console) 查看詳細數據。`);
-        } catch (error) {
-            alert('讀取雲端失敗，請檢查網路。');
-        } finally {
-            btn.textContent = '[☁️] SYNC FROM CLOUD';
-        }
     }
 
     updateUI();
