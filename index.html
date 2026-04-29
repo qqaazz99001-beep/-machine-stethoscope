@@ -721,12 +721,13 @@ function hpsDetect(freqData, nyquist, maxSearchHz) {
     let bestScore = -Infinity;
 
     for (let i = 2; i < maxBin; i++) {
-        if (freqData[i] < 30) continue; // 基礎門檻，太弱直接跳過
-        // 用加總：基頻自己的能量 + 諧波位置的能量加成
+        if (freqData[i] < 30) continue;
         let score = freqData[i] * 2; // 基頻加權
         for (let h = 2; h <= harmonics; h++) {
             const harmonicBin = i * h;
-            if (harmonicBin < binCount) {
+            const harmonicHz = (harmonicBin * nyquist) / binCount;
+            // 只計算在範圍內的諧波，超出 MAX_SEARCH_HZ 的完全忽略
+            if (harmonicBin < binCount && harmonicHz <= maxSearchHz) {
                 score += freqData[harmonicBin];
             }
         }
