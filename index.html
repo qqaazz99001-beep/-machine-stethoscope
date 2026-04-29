@@ -717,16 +717,30 @@ function hpsDetect(freqData, nyquist, maxSearchHz) {
     const maxBin = Math.floor((maxSearchHz / nyquist) * binCount);
     const harmonics = 3;
 
+    // 先檢查範圍外（maxSearchHz ~ maxSearchHz*2）有沒有更強的訊號
+    // 如果有，代表主要聲源在範圍外，直接歸零不偵測
+    const outMinBin = maxBin;
+    const outMaxBin = Math.min(binCount, maxBin * 2);
+    let outMaxVal = 0;
+    for (let i = outMinBin; i < outMaxBin; i++) {
+        if (freqData[i] > outMaxVal) outMaxVal = freqData[i];
+    }
+    let inMaxVal = 0;
+    for (let i = 2; i < maxBin; i++) {
+        if (freqData[i] > inMaxVal) inMaxVal = freqData[i];
+    }
+    // 如果範圍外的峰值比範圍內強，代表聲源在範圍外，不偵測
+    if (outMaxVal > inMaxVal * 1.2) return 0;
+
     let bestBin = -1;
     let bestScore = -Infinity;
 
     for (let i = 2; i < maxBin; i++) {
         if (freqData[i] < 30) continue;
-        let score = freqData[i] * 2; // 基頻加權
+        let score = freqData[i] * 2;
         for (let h = 2; h <= harmonics; h++) {
             const harmonicBin = i * h;
             const harmonicHz = (harmonicBin * nyquist) / binCount;
-            // 只計算在範圍內的諧波，超出 MAX_SEARCH_HZ 的完全忽略
             if (harmonicBin < binCount && harmonicHz <= maxSearchHz) {
                 score += freqData[harmonicBin];
             }
