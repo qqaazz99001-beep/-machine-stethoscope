@@ -715,24 +715,25 @@ function stabilityFilter(hz) {
 function hpsDetect(freqData, nyquist, maxSearchHz) {
     const binCount = freqData.length;
     const maxBin = Math.floor((maxSearchHz / nyquist) * binCount);
-    const harmonics = 3; // 檢查到第 3 諧波
+    const harmonics = 3;
 
     let bestBin = -1;
     let bestScore = -Infinity;
 
     for (let i = 2; i < maxBin; i++) {
-        let score = freqData[i];
+        if (freqData[i] < 30) continue; // 基礎門檻，太弱直接跳過
+        // 用加總：基頻自己的能量 + 諧波位置的能量加成
+        let score = freqData[i] * 2; // 基頻加權
         for (let h = 2; h <= harmonics; h++) {
             const harmonicBin = i * h;
             if (harmonicBin < binCount) {
-                score *= (freqData[harmonicBin] / 255 + 0.01); // +0.01 避免乘以 0
+                score += freqData[harmonicBin];
             }
         }
         if (score > bestScore) { bestScore = score; bestBin = i; }
     }
 
-    // 基礎門檻：原始 bin 值要夠強
-    if (freqData[bestBin] < 30) return 0;
+    if (bestBin < 0 || freqData[bestBin] < 30) return 0;
     return (bestBin * nyquist) / binCount;
 }
 
