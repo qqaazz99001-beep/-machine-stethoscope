@@ -181,14 +181,54 @@
     }
     #spectrogram { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
 
-    /* Frequency marker on spectrogram */
     #freq-marker {
         position: absolute;
-        left: 0; right: 0;
+        left: 40px; right: 0;
         height: 1px;
-        background: rgba(0,229,255,0.4);
+        background: rgba(0,229,255,0.6);
         pointer-events: none;
         display: none;
+        z-index: 3;
+    }
+    #freq-marker-label {
+        position: absolute;
+        left: 44px;
+        background: rgba(0,10,20,0.75);
+        color: var(--cyan);
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 3px;
+        pointer-events: none;
+        display: none;
+        transform: translateY(-50%);
+        white-space: nowrap;
+        z-index: 4;
+        border: 1px solid rgba(0,229,255,0.3);
+    }
+    #hz-scale {
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        width: 40px;
+        background: rgba(0,0,0,0.65);
+        border-right: 1px solid rgba(255,255,255,0.06);
+        pointer-events: none;
+        z-index: 2;
+    }
+    .hz-tick {
+        position: absolute;
+        right: 0;
+        transform: translateY(50%);
+        display: flex;
+        align-items: center;
+        gap: 3px;
+    }
+    .hz-tick-line { width: 5px; height: 1px; background: rgba(255,255,255,0.25); }
+    .hz-tick-label {
+        font-size: 9px;
+        color: rgba(255,255,255,0.4);
+        text-align: right;
+        width: 28px;
+        letter-spacing: 0.3px;
     }
 
     /* DASHBOARD */
@@ -465,7 +505,9 @@
 <div class="content-wrapper">
     <div id="view-spectrogram">
         <canvas id="spectrogram"></canvas>
+        <div id="hz-scale"></div>
         <div id="freq-marker"></div>
+        <div id="freq-marker-label"></div>
     </div>
 
     <div id="view-dashboard">
@@ -713,31 +755,38 @@ function drawLoop() {
         }
     });
 
-    // Spectrogram
+    // Spectrogram — only draw 0~MAX_SEARCH_HZ range
     if (canvas.width !== canvas.offsetWidth) canvas.width = canvas.offsetWidth;
     if (canvas.height !== canvas.offsetHeight) canvas.height = canvas.offsetHeight;
+    const nyquist2 = audioCtx.sampleRate / 2;
+    const displayMaxIdx = Math.floor((MAX_SEARCH_HZ / nyquist2) * freqDataArray.length);
     const imgData = ctx2d.getImageData(1, 0, canvas.width - 1, canvas.height);
     ctx2d.putImageData(imgData, 0, 0);
-    for (let i = 0; i < freqDataArray.length; i++) {
-        const y = canvas.height - (i / freqDataArray.length) * canvas.height;
+    for (let i = 0; i < displayMaxIdx; i++) {
+        const y = canvas.height - ((i / displayMaxIdx) * canvas.height);
         const v = freqDataArray[i];
-        // v=0 → black, low → dark blue/purple, mid → red/orange, high → yellow/white
         const r = Math.min(255, v * 2);
         const g = Math.max(0, v - 128) * 2;
         const b = v < 30 ? v * 3 : Math.max(0, 180 - v * 2);
         ctx2d.fillStyle = `rgb(${r},${g},${b})`;
-        ctx2d.fillRect(canvas.width - 1, y, 1, Math.max(1, canvas.height / freqDataArray.length));
+        ctx2d.fillRect(canvas.width - 1, y, 1, Math.max(1, canvas.height / displayMaxIdx));
     }
 
     // Freq marker line on spectrogram
-    if (!silent && currentHz > 0) {
+    if (!silent && currentHz > 0 && audioCtx) {
+        const nyquist2 = audioCtx.sampleRate / 2;
         const marker = document.getElementById('freq-marker');
-        const freqRatio = currentHz / nyquist;
+        const markerLabel = document.getElementById('freq-marker-label');
+        const freqRatio = currentHz / nyquist2;
         const yPos = canvas.height * (1 - freqRatio);
         marker.style.display = 'block';
         marker.style.top = yPos + 'px';
+        markerLabel.style.display = 'block';
+        markerLabel.style.top = yPos + 'px';
+        markerLabel.textContent = currentHz.toFixed(1) + ' Hz';
     } else {
         document.getElementById('freq-marker').style.display = 'none';
+        document.getElementById('freq-marker-label').style.display = 'none';
     }
 }
 
@@ -869,6 +918,32 @@ function showToast(msg) {
 rebuildProfileSelect();
 renderCalibBar();
 renderGearDots();
+
+// Hz scale — built once, rebuilt on resize
+function buildHzScale() {
+    const scaleEl = document.getElementById('hz-scale');
+    const h = scaleEl.offsetHeight;
+    if (!h) return;
+    // Show ticks for these Hz values (within MAX_SEARCH_HZ range visible)
+    const ticks = [20, 50, 100, 150, 200, 250, 300];
+    // We display full nyquist range on spectrogram (sampleRate/2, usually 22050Hz)
+    // Use a fixed reference of 22050 Hz for positioning before mic starts
+    const nyquistRef = MAX_SEARCH_HZ;
+    scaleEl.innerHTML = '';
+    ticks.forEach(hz => {
+        const ratio = hz / nyquistRef;
+        const yPct = (1 - ratio) * 100;
+        if (yPct < 0 || yPct > 100) return;
+        const tick = document.createElement('div');
+        tick.className = 'hz-tick';
+        tick.style.bottom = (ratio * 100) + '%';
+        tick.innerHTML = `<span class="hz-tick-label">${hz >= 1000 ? (hz/1000)+'k' : hz}</span><span class="hz-tick-line"></span>`;
+        scaleEl.appendChild(tick);
+    });
+}
+
+buildHzScale();
+window.addEventListener('resize', buildHzScale);
 </script>
 </body>
 </html>
