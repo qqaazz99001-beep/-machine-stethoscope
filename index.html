@@ -648,6 +648,19 @@ let audioCtx, analyser, freqDataArray, timeDataArray, source;
 let isRunning = false, isPaused = false;
 let currentHz = 0, currentDb = 0;
 
+// 頻率平滑：保留最近 N 幀的有效值做移動平均
+const HZ_SMOOTH_FRAMES = 8;
+const hzBuffer = [];
+
+function smoothHz(rawHz) {
+    if (rawHz > 0) {
+        hzBuffer.push(rawHz);
+        if (hzBuffer.length > HZ_SMOOTH_FRAMES) hzBuffer.shift();
+    }
+    if (hzBuffer.length === 0) return 0;
+    return hzBuffer.reduce((a, b) => a + b, 0) / hzBuffer.length;
+}
+
 const canvas = document.getElementById('spectrogram');
 const ctx2d = canvas.getContext('2d', { willReadFrequently: true });
 
@@ -718,7 +731,9 @@ function drawLoop() {
     for (let i = 2; i < maxIdx; i++) {
         if (freqDataArray[i] > maxVal) { maxVal = freqDataArray[i]; maxIndex = i; }
     }
-    currentHz = maxVal > 8 ? (maxIndex * nyquist) / freqDataArray.length : 0;
+    // 門檻提高到 30，避免低頻雜訊搶走峰值
+    const rawHz = maxVal > 30 ? (maxIndex * nyquist) / freqDataArray.length : 0;
+    currentHz = smoothHz(rawHz);
 
     // dB RMS
     analyser.getFloatTimeDomainData(timeDataArray);
@@ -729,6 +744,7 @@ function drawLoop() {
 
     // Silence gate
     const silent = currentDb < 3;
+    if (silent) hzBuffer.length = 0;
 
     // Update dashboard
     document.getElementById('hz-val').textContent = silent ? '—' : currentHz.toFixed(1);
